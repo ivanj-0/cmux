@@ -1126,7 +1126,12 @@ export const vmRepositoryLiveShape: VmRepositoryShape = {
       const db = cloudDb();
       const [row] = await db
         .update(cloudVmAccessGrants)
-        .set({ displayName: input.displayName, updatedAt: new Date() })
+        .set({
+          displayName: input.displayName,
+          // Date exposes milliseconds. Keep renames strictly ordered even
+          // when two writers arrive within the same millisecond.
+          updatedAt: sql`greatest(${cloudVms.updatedAt} + interval '1 millisecond', ${new Date()})`,
+        })
         .where(and(
           eq(cloudVmAccessGrants.id, input.id),
           eq(cloudVmAccessGrants.userId, input.userId),
