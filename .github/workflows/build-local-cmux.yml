@@ -1,4 +1,4 @@
-name: Build locally signed cmux DMG
+name: Build locally signed cmux Fixed DMG
 
 on:
   workflow_dispatch:
@@ -8,16 +8,19 @@ permissions:
 
 env:
   CMUX_VERSION: "0.64.22"
-  CMUX_COMMIT: "ddd4a01bc5d8ebac19643930f5fd7d40e85f1534"
+  CMUX_COMMIT: "a86dc683605efba7cccdea776b626ec5171f0500"
+  CMUX_SHORT_COMMIT: "a86dc683"
+  CMUX_REMOTE_DAEMON_MANIFEST: >-
+    {"appVersion":"0.64.22","checksumsAssetName":"cmuxd-remote-checksums.txt","checksumsURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22/cmuxd-remote-checksums.txt","entries":[{"assetName":"cmuxd-remote-darwin-arm64","downloadURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22/cmuxd-remote-darwin-arm64","goArch":"arm64","goOS":"darwin","sha256":"24135694609be7499dd163d95f6dd9416e6b931d7e57b3cbe3404bef4580226c"},{"assetName":"cmuxd-remote-darwin-amd64","downloadURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22/cmuxd-remote-darwin-amd64","goArch":"amd64","goOS":"darwin","sha256":"69f822f185c53775ad1a1918dff5a785a0dfd850d1b5fcf83bd8834a2bdd4a48"},{"assetName":"cmuxd-remote-linux-arm64","downloadURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22/cmuxd-remote-linux-arm64","goArch":"arm64","goOS":"linux","sha256":"a5a5afe2013e3492e21113558bc8ead6ba273e7f41551fd807a5f3f0323fcc44"},{"assetName":"cmuxd-remote-linux-amd64","downloadURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22/cmuxd-remote-linux-amd64","goArch":"amd64","goOS":"linux","sha256":"a65cfd50e173231c021bd5f12e3261bba8562c29361fc68f8a32ad989fbccc5e"}],"releaseTag":"v0.64.22","releaseURL":"https://github.com/manaflow-ai/cmux/releases/download/v0.64.22","schemaVersion":1}
 
 jobs:
   build:
-    name: Build cmux Local on macOS 26
+    name: Build cmux Local Fixed on macOS 26
     runs-on: macos-26
     timeout-minutes: 90
 
     steps:
-      - name: Check out the exact official cmux release
+      - name: Check out pinned official cmux source with SSH fixes
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: manaflow-ai/cmux
@@ -62,41 +65,58 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/reload.sh \
-            --tag cloud-v06422 \
-            --name "cmux Local" \
-            --bundle-id "com.cmuxterm.app.local.v06422" \
+            --tag cloud-fixed-a86dc683 \
+            --name "cmux Local Fixed" \
+            --bundle-id "com.cmuxterm.app.local.fixed.a86dc683" \
             --derived-data "$RUNNER_TEMP/cmux-derived" \
             --no-global-cli-links
+
+      - name: Embed official remote daemon manifest and re-sign
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/cmux-derived/Build/Products/Debug/cmux Local Fixed.app"
+          info="$app/Contents/Info.plist"
+          test -f "$info"
+          plutil -replace CMUXRemoteDaemonManifestJSON -string "$CMUX_REMOTE_DAEMON_MANIFEST" "$info"
+          /usr/bin/codesign --force --deep --sign - "$app"
+
+          cli="$app/Contents/Resources/bin/cmux"
+          "$cli" remote-daemon-status --os linux --arch amd64 | tee "$RUNNER_TEMP/remote-daemon-status.txt"
+          grep -F "commit: $CMUX_SHORT_COMMIT" "$RUNNER_TEMP/remote-daemon-status.txt"
+          grep -F "manifest: present" "$RUNNER_TEMP/remote-daemon-status.txt"
+          grep -F "expected sha256: a65cfd50e173231c021bd5f12e3261bba8562c29361fc68f8a32ad989fbccc5e" "$RUNNER_TEMP/remote-daemon-status.txt"
 
       - name: Verify and package the local build
         shell: bash
         run: |
           set -euo pipefail
-          app="$RUNNER_TEMP/cmux-derived/Build/Products/Debug/cmux Local.app"
+          app="$RUNNER_TEMP/cmux-derived/Build/Products/Debug/cmux Local Fixed.app"
           test -d "$app"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
           /usr/bin/codesign -dv --verbose=4 "$app" 2>&1 | tee "$RUNNER_TEMP/codesign-details.txt"
 
           mkdir -p "$RUNNER_TEMP/dmg-root"
-          /usr/bin/ditto "$app" "$RUNNER_TEMP/dmg-root/cmux Local.app"
+          /usr/bin/ditto "$app" "$RUNNER_TEMP/dmg-root/cmux Local Fixed.app"
           ln -s /Applications "$RUNNER_TEMP/dmg-root/Applications"
           hdiutil create \
-            -volname "cmux Local $CMUX_VERSION" \
+            -volname "cmux Local Fixed $CMUX_SHORT_COMMIT" \
             -srcfolder "$RUNNER_TEMP/dmg-root" \
             -ov \
             -format UDZO \
-            "$RUNNER_TEMP/cmux-local-v$CMUX_VERSION.dmg"
+            "$RUNNER_TEMP/cmux-local-fixed-$CMUX_SHORT_COMMIT.dmg"
 
           cd "$RUNNER_TEMP"
-          shasum -a 256 "cmux-local-v$CMUX_VERSION.dmg" | tee "cmux-local-v$CMUX_VERSION.sha256"
+          shasum -a 256 "cmux-local-fixed-$CMUX_SHORT_COMMIT.dmg" | tee "cmux-local-fixed-$CMUX_SHORT_COMMIT.sha256"
 
       - name: Upload DMG and verification records
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cmux-local-v0.64.22-macos-arm64
+          name: cmux-local-fixed-a86dc683-macos-arm64
           path: |
-            ${{ runner.temp }}/cmux-local-v0.64.22.dmg
-            ${{ runner.temp }}/cmux-local-v0.64.22.sha256
+            ${{ runner.temp }}/cmux-local-fixed-a86dc683.dmg
+            ${{ runner.temp }}/cmux-local-fixed-a86dc683.sha256
             ${{ runner.temp }}/codesign-details.txt
+            ${{ runner.temp }}/remote-daemon-status.txt
           if-no-files-found: error
           retention-days: 7
