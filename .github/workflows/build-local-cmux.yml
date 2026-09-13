@@ -24,6 +24,7 @@ jobs:
           ref: ddd4a01bc5d8ebac19643930f5fd7d40e85f1534
           fetch-depth: 1
           submodules: recursive
+          persist-credentials: false
 
       - name: Verify pinned source commit
         shell: bash
